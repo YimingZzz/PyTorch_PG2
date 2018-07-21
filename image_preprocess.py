@@ -28,7 +28,7 @@ from skimage.morphology import square, dilation, erosion
 #args = parser.parse_args()
 
 torch.set_num_threads(torch.get_num_threads())
-weight_name = './model/pose_model.pth'
+weight_name = '/home/yiming/code/data/model/pose_model.pth'
 
 blocks = {}
 
@@ -53,9 +53,12 @@ for i in range(2,7):
 def reverse_xy(raw_key_points):
     new_key_points = []
     #reverse x and y coordinate
-    for i in range(len(raw_key_points)):
-        new_point = (raw_key_points[i][1], raw_key_points[i][0])
-        new_key_points.append(new_point)
+    for item in raw_key_points:
+	if item != []:
+            new_point = (item[1], item[0])
+	else:
+	    new_point = []        
+    new_key_points.append(new_point)
     return new_key_points
 
 #fill in the radius of 4
@@ -70,8 +73,9 @@ def fill_in(pose_img, point, radius):
 def get_heatmap_pose(new_key_points):
     heatmap_pose = np.zeros([256, 256])
     for item in new_key_points:
-        pos_x, pos_y = item
-        heatmap_pose = fill_in(heatmap_pose, item, 4)
+	if item != []:
+            pos_x, pos_y = item
+            heatmap_pose = fill_in(heatmap_pose, item, 4)
     return heatmap_pose
 
 #connect corresponding joints together
@@ -206,7 +210,7 @@ param_, model_ = config_reader()
 
 #torch.nn.functional.pad(img pad, mode='constant', value=model_['padValue'])
 tic = time.time()
-test_image = './sample_image/ski.jpg'
+test_image = '/home/yiming/code/data/sample_image/00001_1.jpg'
 #test_image = 'a.jpg'
 oriImg = cv2.imread(test_image) # B,G,R order
 imageToTest = Variable(T.transpose(T.transpose(T.unsqueeze(torch.from_numpy(oriImg).float(),0),2,3),1,2),volatile=True).cuda()
@@ -290,20 +294,21 @@ for part in range(18):
 raw_key_points = []
 for item in all_peaks:
     if item != []:
-        raw_key_points.append(all_peaks[0][0:2])
+        raw_key_points.append(item[0][0:2])
     else:
         raw_key_points.append([])
 print (raw_key_points)
+print (len(raw_key_points))
 
 new_key_points = reverse_xy(raw_key_points)
 print (new_key_points)
 
-os.mkdir('/home/yiming/code/image_preprocess/heatmap_pose/')
-heatmap_pose_path = '/home/yiming/code/image_preprocess/heatmap_pose/'
-os.mkdir('/home/yiming/code/image_preprocess/skeleton_pose')
-skeleton_pose_path = '/home/yiming/code/image_preprocess/skeleton_pose/'
-os.mkdir('/home/yiming/code/image_preprocess/pose_mask')
-pose_mask_path = '/home/yiming/code/image_preprocess/pose_mask/'
+os.mkdir('/home/yiming/code/data/heatmap_pose/')
+heatmap_pose_path = '/home/yiming/code/data/heatmap_pose/'
+os.mkdir('/home/yiming/code/data/skeleton_pose')
+skeleton_pose_path = '/home/yiming/code/data/skeleton_pose/'
+os.mkdir('/home/yiming/code/data/pose_mask')
+pose_mask_path = '/home/yiming/code/data/pose_mask/'
 
 heatmap_pose = get_heatmap_pose(new_key_points)
 cv2.imwrite(os.path.join(heatmap_pose_path, 'heatmap1.jpg'))
