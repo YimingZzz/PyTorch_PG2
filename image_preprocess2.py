@@ -222,7 +222,7 @@ param_, model_ = config_reader()
 #torch.nn.functional.pad(img pad, mode='constant', value=model_['padValue'])
 #for imgs in os.path()
 root_path = '/home/yiming/code/data/DeepFashion/DF_img_pose/'
-img_path = os.path.join(root_path, 'train_img/')
+img_path = os.path.join(root_path, 'train_img_flip/')
 img_counter = 0
 for img in os.listdir(img_path):
     img_idx = img.split('.')[0]
@@ -305,15 +305,15 @@ for img in os.listdir(img_path):
 
     new_key_points = reverse_xy(raw_key_points)
 
-    heatmap_pose_path = os.path.join(root_path, 'train_img_heatmap/')
+    heatmap_pose_path = os.path.join(root_path, 'train_img_filp_heatmap/')
     if(os.path.exists(heatmap_pose_path) is False):
         os.mkdir(heatmap_pose_path)
 
-    skeleton_pose_path = os.path.join(root_path, 'train_img_skeleton/')
+    skeleton_pose_path = os.path.join(root_path, 'train_img_flip_skeleton/')
     if (os.path.exists(skeleton_pose_path) is False):
         os.mkdir(skeleton_pose_path)
 
-    pose_mask_path = os.path.join(root_path, 'train_img_mask/')
+    pose_mask_path = os.path.join(root_path, 'train_img_flip_mask/')
     if (os.path.exists(pose_mask_path) is False):
         os.mkdir(pose_mask_path)
 

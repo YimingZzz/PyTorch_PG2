@@ -7,7 +7,8 @@ import time
 import scipy
 import argparse
 import matplotlib
-from torch import np
+#from torch import np
+import numpy as np
 import pylab as plt
 from joblib import Parallel, delayed
 import util
@@ -27,6 +28,8 @@ from skimage.morphology import square, dilation, erosion
 #parser.add_argument('--pth_file', required=True)
 #args = parser.parse_args()
 
+
+#device = torch.device("cuda:1")
 torch.set_num_threads(torch.get_num_threads())
 weight_name = '/home/yiming/code/data/model/pose_model.pth'
 
@@ -34,7 +37,7 @@ blocks = {}
 
 
 limb_seq = [[1,2], [2,3], [3,4], [4,5], [2,6], [6,7], [7,8], [2,9], [9,10], [10,11], [9,3], [2,12], [12,13], [13,14],
-           [9,12], [6, 12], [2,17], [2,18], [1,17], [1,18], [1,15], [1,16], [15,17], [16,18]]
+           [9,12], [6,12], [2,17], [2,18], [1,17], [1,18], [1,15], [1,16], [15,17], [16,18]]
 
              
 block0  = [{'conv1_1':[3,64,3,1,1]},{'conv1_2':[64,64,3,1,1]},{'pool1_stage1':[2,2,0]},{'conv2_1':[64,128,3,1,1]},{'conv2_2':[128,128,3,1,1]},{'pool2_stage1':[2,2,0]},{'conv3_1':[128,256,3,1,1]},{'conv3_2':[256,256,3,1,1]},{'conv3_3':[256,256,3,1,1]},{'conv3_4':[256,256,3,1,1]},{'pool3_stage1':[2,2,0]},{'conv4_1':[256,512,3,1,1]},{'conv4_2':[512,512,3,1,1]},{'conv4_3_CPM':[512,256,3,1,1]},{'conv4_4_CPM':[256,128,3,1,1]}]
@@ -63,6 +66,8 @@ def reverse_xy(raw_key_points):
 
 #fill in the radius of 4
 def fill_in(pose_img, point, radius):
+    
+    #pose_img = np.zeros([256, 256])
     point_x, point_y = point
     for x in range(point_x - radius, point_x + radius + 1):
         for y in range(point_y - radius, point_y + radius + 1):
@@ -71,12 +76,25 @@ def fill_in(pose_img, point, radius):
                     pose_img[x][y] = 255
     return pose_img
     
+
+def fill_in2(pose_img, point, radius):
+    
+    #pose_fill_img = np.zeros([256, 256])
+    pose_fill_img = pose_img
+    point_x, point_y = point
+    for x in range(point_x - radius, point_x + radius + 1):
+        for y in range(point_y - radius, point_y + radius + 1):
+            if ((x-point_x)*(x-point_x)+(y-point_y)*(y-point_y)) <= 16:
+                if (x >= 0) and (x <= 255) and (y >= 0) and (y <= 255): 
+                    pose_fill_img[x][y] = 255
+    return pose_fill_img
+
 def get_heatmap_pose(new_key_points):
     #print ('Get Heatmap...')
     heatmap_pose = np.zeros([256, 256])
     for item in new_key_points:
         if item != []:
-            heatmap_pose = fill_in(heatmap_pose, item, 4)
+            heatmap_pose = fill_in2(heatmap_pose, item, 4)
     return heatmap_pose
 
 def get_18_heatmaps(new_key_points):
@@ -91,8 +109,9 @@ def get_18_heatmaps(new_key_points):
 #connect corresponding joints together
 def connect_keypoints(pose_img, new_key_points, limb_seq):
     #print ('Get Skeleton...') 
+    fill_list = []
     for i in range (len(limb_seq)):
-        fill_list = []
+        #fill_list = []
         #get the equation of the line
         point1 = new_key_points[limb_seq[i][0] - 1]
         #print(point1)
@@ -109,7 +128,7 @@ def connect_keypoints(pose_img, new_key_points, limb_seq):
                     for y in range(y2, y1):
                         fill_list.append([x1, y])
             else:
-                k = (1.0*y2 - y1)/(1.0*x2 - x1)
+                k = (y2 - y1)/(x2 - x1)
                 b = y1 - k*x1
                 if (x1 < x2):
                     #for x in range(x1, x2):
@@ -122,14 +141,57 @@ def connect_keypoints(pose_img, new_key_points, limb_seq):
                     for x in xs:
                         fill_list.append([int(x), int(k*x + b)])
 
-        for item in fill_list:
-            pose_img = fill_in(pose_img, item, 4)
+    for item in fill_list:
+        skeleton = fill_in(pose_img, item, 4)
     
-    return pose_img
+    return skeleton
+
+def get_connect_list(pose_img, new_key_points, limb_seq):
+    #check the sequence of connection
+    connect_list = []
+    for i in range (len(limb_seq)):
+        fill_list = []
+        #get the equation of the line
+        point1 = new_key_points[limb_seq[i][0] - 1]
+        print(point1)
+        point2 = new_key_points[limb_seq[i][1] - 1]
+        print(point2)
+        if (point1 != []) and (point2 != []):
+            x1, y1 = point1
+            x2, y2 = point2
+            if x2 - x1 == 0:
+                if (y1 < y2):
+                    for y in range(y1, y2):
+                        fill_list.append([x1, y])
+                else:
+                    for y in range(y2, y1):
+                        fill_list.append([x1, y])
+            else:
+                k = (y2 - y1)/(x2 - x1)
+                b = y1 - k*x1
+                if (x1 < x2):
+                    #for x in range(x1, x2):
+                    xs = np.linspace(x1, x2, 50)    
+                    for x in xs: 
+                        fill_list.append([int(x), int(k*x + b)])
+                else:
+                    #for x in range(x2, x1):
+                    xs = np.linspace(x2, x1, 50)
+                    for x in xs:
+                        fill_list.append([int(x), int(k*x + b)])
+	    
+	    print (fill_list)
+
+            for item in fill_list:
+                connect_item = fill_in2(pose_img, item, 4)
+            connect_list.append(connect_item)
+
+    return connect_list
+
 
 def get_mask(skeleton_pose):
     #print('Get the mask...')
-    return erosion(dilation(skeleton_pose, square(30)), square(10))
+    return erosion(dilation(skeleton_pose, square(25)), square(10))
 
 def make_layers(cfg_dict):
     layers = []
@@ -221,113 +283,119 @@ param_, model_ = config_reader()
 
 #torch.nn.functional.pad(img pad, mode='constant', value=model_['padValue'])
 #for imgs in os.path()
-root_path = '/home/yiming/code/data/DeepFashion/DF_img_pose/'
-img_path = os.path.join(root_path, 'train_img/')
-img_counter = 0
-for img in os.listdir(img_path):
-    img_idx = img.split('.')[0]
-    img_counter += 1
-    if (img_counter % 1000 == 0):
-        print ("processed %d images\n"% img_counter)
-    #test_image = '/home/yiming/code/data/sample_image/00001_1.jpg'
-    oriImg = cv2.imread(os.path.join(img_path, img)) # B,G,R order
 
-    multiplier = [x * model_['boxsize'] / oriImg.shape[0] for x in param_['scale_search']]
-    heatmap_avg = torch.zeros((len(multiplier),19,oriImg.shape[0], oriImg.shape[1])).cuda()
-    paf_avg = torch.zeros((len(multiplier),38,oriImg.shape[0], oriImg.shape[1])).cuda()
+img = '/home/yiming/code/data/DeepFashion/DF_img_pose/test_samples_img/00038_7.jpg'
+oriImg = cv2.imread(img) # B,G,R order
 
-    for m in range(len(multiplier)):
-        scale = multiplier[m]
-        h = int(oriImg.shape[0]*scale)
-        w = int(oriImg.shape[1]*scale)
-        pad_h = 0 if (h%model_['stride']==0) else model_['stride'] - (h % model_['stride']) 
-        pad_w = 0 if (w%model_['stride']==0) else model_['stride'] - (w % model_['stride'])
-        new_h = h+pad_h
-        new_w = w+pad_w
+multiplier = [x * model_['boxsize'] / oriImg.shape[0] for x in param_['scale_search']]
+heatmap_avg = torch.zeros((len(multiplier),19,oriImg.shape[0], oriImg.shape[1])).cuda()
+paf_avg = torch.zeros((len(multiplier),38,oriImg.shape[0], oriImg.shape[1])).cuda()
 
-        imageToTest = cv2.resize(oriImg, (0,0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-        imageToTest_padded, pad = util.padRightDownCorner(imageToTest, model_['stride'], model_['padValue'])
-        imageToTest_padded = np.transpose(np.float32(imageToTest_padded[:,:,:,np.newaxis]), (3,2,0,1))/256 - 0.5
-        
-        feed = Variable(T.from_numpy(imageToTest_padded)).cuda()      
-        output1,output2 = model(feed)
+for m in range(len(multiplier)):
+    scale = multiplier[m]
+    h = int(oriImg.shape[0]*scale)
+    w = int(oriImg.shape[1]*scale)
+    pad_h = 0 if (h%model_['stride']==0) else model_['stride'] - (h % model_['stride']) 
+    pad_w = 0 if (w%model_['stride']==0) else model_['stride'] - (w % model_['stride'])
+    new_h = h+pad_h
+    new_w = w+pad_w
 
-        heatmap = nn.UpsamplingBilinear2d((oriImg.shape[0], oriImg.shape[1])).cuda()(output2)
-        
-        paf = nn.UpsamplingBilinear2d((oriImg.shape[0], oriImg.shape[1])).cuda()(output1)       
+    imageToTest = cv2.resize(oriImg, (0,0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    imageToTest_padded, pad = util.padRightDownCorner(imageToTest, model_['stride'], model_['padValue'])
+    imageToTest_padded = np.transpose(np.float32(imageToTest_padded[:,:,:,np.newaxis]), (3,2,0,1))/256 - 0.5
 
-        heatmap_avg[m] = heatmap[0].data
-        paf_avg[m] = paf[0].data  
-        
-        
-        
-    heatmap_avg = T.transpose(T.transpose(T.squeeze(T.mean(heatmap_avg, 0)),0,1),1,2).cuda() 
-    heatmap_avg=heatmap_avg.cpu().numpy()
-    paf_avg    = paf_avg.cpu().numpy()
+    feed = Variable(T.from_numpy(imageToTest_padded)).cuda()      
+    output1,output2 = model(feed)
+
+    heatmap = nn.UpsamplingBilinear2d((oriImg.shape[0], oriImg.shape[1])).cuda()(output2)
+
+    paf = nn.UpsamplingBilinear2d((oriImg.shape[0], oriImg.shape[1])).cuda()(output1)       
+
+    heatmap_avg[m] = heatmap[0].data
+    paf_avg[m] = paf[0].data  
 
 
-    all_peaks = []
-    peak_counter = 0
 
-    #maps = 
-    for part in range(18):
-        map_ori = heatmap_avg[:,:,part]
-        map = gaussian_filter(map_ori, sigma=3)
-        
-        map_left = np.zeros(map.shape)
-        map_left[1:,:] = map[:-1,:]
-        map_right = np.zeros(map.shape)
-        map_right[:-1,:] = map[1:,:]
-        map_up = np.zeros(map.shape)
-        map_up[:,1:] = map[:,:-1]
-        map_down = np.zeros(map.shape)
-        map_down[:,:-1] = map[:,1:]
-        
-        peaks_binary = np.logical_and.reduce((map>=map_left, map>=map_right, map>=map_up, map>=map_down, map > param_['thre1']))
-    #    peaks_binary = T.eq(
-    #    peaks = zip(T.nonzero(peaks_binary)[0],T.nonzero(peaks_binary)[0])
-        
-        peaks = zip(np.nonzero(peaks_binary)[1], np.nonzero(peaks_binary)[0]) # note reverse
-        
-        peaks_with_score = [x + (map_ori[x[1],x[0]],) for x in peaks]
-        id = range(peak_counter, peak_counter + len(peaks))
-        peaks_with_score_and_id = [peaks_with_score[i] + (id[i],) for i in range(len(id))]
+heatmap_avg = T.transpose(T.transpose(T.squeeze(T.mean(heatmap_avg, 0)),0,1),1,2).cuda() 
+heatmap_avg=heatmap_avg.cpu().numpy()
+paf_avg    = paf_avg.cpu().numpy()
 
-        all_peaks.append(peaks_with_score_and_id)
-        peak_counter += len(peaks)
 
-    raw_key_points = []
-    for item in all_peaks:
-        if item != []:
-            raw_key_points.append(item[0][0:2])
-        else:
-            raw_key_points.append([])
+all_peaks = []
+peak_counter = 0
 
-    new_key_points = reverse_xy(raw_key_points)
+#maps = 
+for part in range(18):
+    map_ori = heatmap_avg[:,:,part]
+    map = gaussian_filter(map_ori, sigma=3)
 
-    heatmap_pose_path = os.path.join(root_path, 'train_img_heatmap/')
-    if(os.path.exists(heatmap_pose_path) is False):
-        os.mkdir(heatmap_pose_path)
+    map_left = np.zeros(map.shape)
+    map_left[1:,:] = map[:-1,:]
+    map_right = np.zeros(map.shape)
+    map_right[:-1,:] = map[1:,:]
+    map_up = np.zeros(map.shape)
+    map_up[:,1:] = map[:,:-1]
+    map_down = np.zeros(map.shape)
+    map_down[:,:-1] = map[:,1:]
 
-    skeleton_pose_path = os.path.join(root_path, 'train_img_skeleton/')
-    if (os.path.exists(skeleton_pose_path) is False):
-        os.mkdir(skeleton_pose_path)
+    peaks_binary = np.logical_and.reduce((map>=map_left, map>=map_right, map>=map_up, map>=map_down, map > param_['thre1']))
+#    peaks_binary = T.eq(
+#    peaks = zip(T.nonzero(peaks_binary)[0],T.nonzero(peaks_binary)[0])
 
-    pose_mask_path = os.path.join(root_path, 'train_img_mask/')
-    if (os.path.exists(pose_mask_path) is False):
-        os.mkdir(pose_mask_path)
+    peaks = zip(np.nonzero(peaks_binary)[1], np.nonzero(peaks_binary)[0]) # note reverse
 
-    heatmap_pose = get_heatmap_pose(new_key_points)
-    heatmaps_18 = get_18_heatmaps(new_key_points)
+    peaks_with_score = [x + (map_ori[x[1],x[0]],) for x in peaks]
+    id = range(peak_counter, peak_counter + len(peaks))
+    peaks_with_score_and_id = [peaks_with_score[i] + (id[i],) for i in range(len(id))]
 
-    for i in range(len(heatmaps_18)):
-        cv2.imwrite(os.path.join(heatmap_pose_path, (img_idx + '_' + 'heatmap' + '_' + str(i+1) + '.jpg')), heatmaps_18[i])
-    
-    skeleton_pose = connect_keypoints(heatmap_pose, new_key_points, limb_seq)
-    cv2.imwrite(os.path.join(skeleton_pose_path, (img_idx + '_' + 'skeleton' + '.jpg')), skeleton_pose)
-    
-    pose_mask = get_mask(skeleton_pose)
-    cv2.imwrite(os.path.join(pose_mask_path, (img_idx + '_' + 'mask' + '.jpg' )), pose_mask)
+    all_peaks.append(peaks_with_score_and_id)
+    peak_counter += len(peaks)
 
-    
+raw_key_points = []
+for item in all_peaks:
+    if item != []:
+        raw_key_points.append(item[0][0:2])
+    else:
+        raw_key_points.append([])
+
+new_key_points = reverse_xy(raw_key_points)
+
+'''
+heatmap_pose_path = os.path.join(root_path, 'test_samples_img_heatmap/')
+if(os.path.exists(heatmap_pose_path) is False):
+    os.mkdir(heatmap_pose_path)
+
+skeleton_pose_path = os.path.join(root_path, 'test_samples_img_skeleton/')
+if (os.path.exists(skeleton_pose_path) is False):
+    os.mkdir(skeleton_pose_path)
+
+pose_mask_path = os.path.join(root_path, 'test_samples_img_mask/')
+if (os.path.exists(pose_mask/_path) is False):
+    os.mkdir(pose_mask_path)
+'''
+
+heatmap_pose = get_heatmap_pose(new_key_points)
+heatmaps_18 = get_18_heatmaps(new_key_points)
+connect_list = get_connect_list(heatmap_pose, new_key_points, limb_seq)
+
+for i in range(len(heatmaps_18)):
+    cv2.imwrite(os.path.join('/home/yiming/code/data/DeepFashion/DF_img_pose/debug/', ('heatmap' + '_' + str(i+1) + '.jpg')), heatmaps_18[i])
+
+cv2.imwrite(os.path.join('/home/yiming/code/data/DeepFashion/DF_img_pose/debug/', 'heatmap.jpg'), heatmap_pose)
+
+
+
+skeleton_pose = connect_keypoints(heatmap_pose, new_key_points, limb_seq)
+cv2.imwrite(os.path.join('/home/yiming/code/data/DeepFashion/DF_img_pose/debug/', ('skeleton' + '.jpg')), skeleton_pose)
+
+pose_mask = get_mask(skeleton_pose)
+cv2.imwrite(os.path.join('/home/yiming/code/data/DeepFashion/DF_img_pose/debug/', ('mask' + '.jpg')), pose_mask)
+
+
+print (len(connect_list))
+for i in range(len(connect_list)):
+    cv2.imwrite(os.path.join('/home/yiming/code/data/DeepFashion/DF_img_pose/debug/', ('connect' + '_' + str(i+1) + '.jpg')), connect_list[i])
+
+
+
 
